@@ -1,0 +1,79 @@
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+build/
+develop-eggs/
+dist/
+downloads/
+eggs/
+.eggs/
+lib/
+lib64/
+parts/
+sdist/
+var/
+wheels/
+*.egg-info/
+.installed.cfg
+*.egg
+
+# Virtual Environment
+venv/
+ENV/
+env/
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+.DS_Store
+
+# PyCharm
+.idea/
+
+# VS Code
+.vscode/
+
+# Type checking
+.pyre/
+.pytype/
+.mypy_cache/
+.pyrightconfig.json
+
+# Project specific
+data/library.db
+data/videos.db
+data/images/covers/*.jpg
+data/images/covers/*.png
+data/images/avatars/*.jpg
+data/images/avatars/*.png
+data/images/*
+!data/images/.gitkeep
+
+# Logs
+*.log
+logs/
+
+# Config files (user specific)
+config.json
+.user.json
+
+# Temp files
+*.tmp
+*.bak
+app.log
+test_run.log
+
+# Playwright
+.playwright/
+ms-playwright/
+
+# OS
+.DS_Store
+Thumbs.db
+desktop.ini
