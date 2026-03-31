@@ -1,6 +1,17 @@
 # Contributing to JAV Lib Manager
 
-感谢您考虑为 JAV Lib Manager 做出贡献！
+感谢您考虑为 **JAV Lib Manager** 做出贡献！
+
+## 项目信息
+
+- **GitHub**: https://github.com/ShadyDon-EdoTensei/jav-lib-manager
+- **作者**: ShadyDon
+- **邮箱**: ShadyDon-EdoTensein@users.noreply.github.com
+- **许可证**: MIT
+
+---
+
+
 
 ## 开发环境设置
 
@@ -14,7 +25,7 @@
 
 1. **克隆仓库**
    ```bash
-   git clone https://github.com/ShadyDon/jav-lib-manager.git
+   git clone https://github.com/ShadyDon-EdoTensei/jav-lib-manager.git
    cd jav-lib-manager
    ```
 
@@ -199,7 +210,7 @@ git push origin feature/your-feature-name
 
 如果你发现了 bug 或有功能建议：
 
-1. 检查 [Issues](https://github.com/ShadyDon/jav-lib-manager/issues) 是否已存在
+1. 检查 [Issues](https://github.com/ShadyDon-EdoTensei/jav-lib-manager/issues) 是否已存在
 2. 如果没有，创建新的 Issue
 3. 提供详细信息：
    - 复现步骤

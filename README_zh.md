@@ -56,39 +56,51 @@
 
 ### 环境要求
 
-- **Python**: 3.9 或更高版本
+- **Python**: 3.9 或更高版本 — [点击下载](https://www.python.org/downloads/)（安装时务必勾选 "Add Python to PATH"）
 - **操作系统**: Windows 10/11
 - **磁盘空间**: 500MB 以上用于依赖项
+- **网络**: 获取元数据需要联网
 
 ### 安装指南
 
 #### 方法一：使用 Git（推荐）
 
 ```bash
-# 克隆仓库
-git clone https://github.com/ShadyDon/jav-lib-manager.git
+# 1. 确认 Python 版本（必须是 3.9+）
+python --version
+
+# 2. 克隆仓库
+git clone https://github.com/ShadyDon-EdoTensei/jav-lib-manager.git
 cd jav-lib-manager
 
-# 创建虚拟环境（推荐）
+# 3. 创建虚拟环境（可选）
 python -m venv venv
-venv\Scripts\activate  # Windows
-source venv/bin/activate  # Linux/Mac
+venv\Scripts\activate
 
-# 安装依赖
+# 4. 安装 Python 依赖
 pip install -r requirements.txt
 
-# 安装 Playwright 浏览器
+# 5. 安装 Playwright 浏览器引擎（约300MB，首次安装）
 playwright install chromium
 
-# 启动应用
+# 6. 启动应用
 python run_app.py
 ```
 
-#### 方法二：下载 ZIP
+#### 方法二：下载 ZIP（无需 Git）
 
-1. 从 [发布页面](https://github.com/ShadyDon/jav-lib-manager/releases) 下载最新版本
-2. 解压 ZIP 文件
-3. 按照方法一的步骤 3-6 操作
+1. 前往 [发布页面](https://github.com/ShadyDon-EdoTensei/jav-lib-manager/releases) 下载最新 ZIP
+2. 解压到任意文件夹（如 `C:\jav-lib-manager\`）
+3. 在该文件夹打开 **命令提示符** 或 **PowerShell**
+4. 依次执行：
+```bash
+python --version          # 确认 Python 3.9+
+pip install -r requirements.txt
+playwright install chromium
+python run_app.py
+```
+
+> **提示：** 如果 `python` 命令无法识别，说明需要先安装 Python，并在安装时勾选 "Add Python to PATH"。
 
 ### 使用说明
 
@@ -262,9 +274,9 @@ A: 此功能计划在 v2.0.0 版本中推出，敬请期待！
 
 ### 获取支持
 
-- 📧 邮箱: 1840630471@qq.com
-- 🐛 问题反馈: [GitHub Issues](https://github.com/ShadyDon/jav-lib-manager/issues)
-- 💬 讨论: [GitHub Discussions](https://github.com/ShadyDon/jav-lib-manager/discussions)
+- 📧 邮箱: ShadyDon-EdoTensein@users.noreply.github.com
+- 🐛 问题反馈: [GitHub Issues](https://github.com/ShadyDon-EdoTensei/jav-lib-manager/issues)
+- 💬 讨论: [GitHub Discussions](https://github.com/ShadyDon-EdoTensei/jav-lib-manager/discussions)
 
 ---
 

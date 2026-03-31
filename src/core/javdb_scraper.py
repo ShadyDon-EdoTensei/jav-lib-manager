@@ -9,6 +9,22 @@ import logging
 
 logger = logging.getLogger(__name__)
 
+
+def _normalize_image_url(url: Optional[str], base_url: str) -> str:
+    """Normalize image URLs from JavDB pages."""
+    if not url:
+        return ""
+
+    url = url.strip()
+    if not url:
+        return ""
+
+    if url.startswith("//"):
+        return f"https:{url}"
+    if url.startswith("/"):
+        return f"{base_url.rstrip('/')}{url}"
+    return url
+
 @dataclass
 class JavDBMetadata:
     """JavDB视频元数据"""
@@ -245,13 +261,31 @@ class JavDBScraper:
             title_elem = await page.query_selector('h2.title')
             title = await title_elem.inner_text() if title_elem else video_id
 
-            # 封面图
+            # 封面图，兼容多种页面结构
             cover_url = ""
-            cover_elem = await page.query_selector('.column-video-cover img')
-            if cover_elem:
+            cover_selectors = [
+                '.column-video-cover img',
+                '.video-cover img',
+                'a.bigImage img',
+                '.tile-images img',
+            ]
+            for selector in cover_selectors:
+                cover_elem = await page.query_selector(selector)
+                if not cover_elem:
+                    continue
+
                 src = await cover_elem.get_attribute('src')
                 data_src = await cover_elem.get_attribute('data-src')
-                cover_url = data_src or src or ""
+                fancybox_src = await cover_elem.get_attribute('data-fancybox')
+                cover_url = _normalize_image_url(data_src or src or fancybox_src, self.BASE_URL)
+                if cover_url:
+                    break
+
+            if not cover_url:
+                og_image = await page.query_selector('meta[property="og:image"]')
+                if og_image:
+                    og_content = await og_image.get_attribute('content')
+                    cover_url = _normalize_image_url(og_content, self.BASE_URL)
 
             # 解析元数据面板
             blocks = await page.query_selector_all('.panel .panel-block')

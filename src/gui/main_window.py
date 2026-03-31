@@ -3,6 +3,7 @@
 import os
 import logging
 import platform
+import threading
 from typing import Optional
 
 from PyQt6.QtWidgets import (
@@ -13,7 +14,7 @@ from PyQt6.QtWidgets import (
     QTextEdit, QMenuBar, QApplication
 )
 from PyQt6.QtCore import Qt, QThread, pyqtSignal, QSize, QObject, QTimer
-from PyQt6.QtGui import QPixmap, QImage, QIcon
+from PyQt6.QtGui import QPixmap, QImage, QIcon, QCloseEvent
 
 import qtawesome
 
@@ -31,12 +32,24 @@ class ScanThread(QThread):
     """扫描线程"""
     progress = pyqtSignal(str, int, int)  # 当前路径, 当前数量, 总数
     finished = pyqtSignal(list)  # 扫描结果
+    stopped = pyqtSignal()
     error = pyqtSignal(str)
 
     def __init__(self, directory: str, recursive: bool = True):
         super().__init__()
         self.directory = directory
         self.recursive = recursive
+        self._stop_event = threading.Event()
+        self._was_stopped = False
+
+    def request_stop(self):
+        self._stop_event.set()
+
+    def is_stop_requested(self) -> bool:
+        return self._stop_event.is_set()
+
+    def was_stopped(self) -> bool:
+        return self._was_stopped
 
     def run(self):
         try:
@@ -44,8 +57,12 @@ class ScanThread(QThread):
             results = scanner.scan_directory(
                 self.directory,
                 progress_callback=lambda p, c, t: self.progress.emit(p, c, t),
-                recursive=self.recursive
+                recursive=self.recursive,
+                should_stop=self.is_stop_requested
             )
+            self._was_stopped = self.is_stop_requested()
+            if self._was_stopped:
+                self.stopped.emit()
             self.finished.emit(results)
         except Exception as e:
             self.error.emit(str(e))
@@ -56,16 +73,32 @@ class FetchMetadataThread(QThread):
     progress = pyqtSignal(str, str)  # 番号, 状态
     metadata_fetched = pyqtSignal(str, object)  # 番号, 元数据 - 实时保存
     finished = pyqtSignal(dict)  # {code: metadata}
+    stopped = pyqtSignal()
     error = pyqtSignal(str, str)  # code, error
 
     def __init__(self, codes: list[str]):
         super().__init__()
         self.codes = codes
+        self._stop_event = threading.Event()
+        self._was_stopped = False
+
+    def request_stop(self):
+        self._stop_event.set()
+
+    def is_stop_requested(self) -> bool:
+        return self._stop_event.is_set()
+
+    def was_stopped(self) -> bool:
+        return self._was_stopped
 
     def run(self):
         scraper = get_scraper()
         results = {}
         for code in self.codes:
+            if self.is_stop_requested():
+                self._was_stopped = True
+                self.stopped.emit()
+                break
             try:
                 self.progress.emit(code, "正在获取...")
                 metadata = scraper.fetch(code)
@@ -77,6 +110,8 @@ class FetchMetadataThread(QThread):
                     self.progress.emit(code, "未找到")
             except Exception as e:
                 self.error.emit(code, str(e))
+        if self.is_stop_requested():
+            self._was_stopped = True
         self.finished.emit(results)
 
 
@@ -109,6 +144,7 @@ class CoverViewerDialog(QDialog):
 
 class ScanProgressDialog(QDialog):
     """扫描进度对话框"""
+    stop_requested = pyqtSignal()
 
     def __init__(self, parent=None):
         super().__init__(parent)
@@ -136,7 +172,7 @@ class ScanProgressDialog(QDialog):
         self.bg_button = QPushButton("后台运行")
         self.bg_button.clicked.connect(self.hide)
         self.cancel_button = QPushButton("取消")
-        self.cancel_button.clicked.connect(self.reject)
+        self.cancel_button.clicked.connect(self._on_cancel_clicked)
         btn_layout.addStretch()
         btn_layout.addWidget(self.bg_button)
         btn_layout.addWidget(self.cancel_button)
@@ -153,6 +189,11 @@ class ScanProgressDialog(QDialog):
     def update_stats(self, total: int, parsed: int):
         """更新统计"""
         self.stats_label.setText(f"已发现: {total} 个文件\n已识别番号: {parsed} 个")
+
+    def _on_cancel_clicked(self):
+        self.cancel_button.setEnabled(False)
+        self.cancel_button.setText("正在停止...")
+        self.stop_requested.emit()
 
 
 class LogWindow(QDialog):
@@ -213,6 +254,11 @@ class MainWindow(QMainWindow):
         # 扫描结果
         self.scan_results: list[VideoFile] = []
         self.metadata_results: dict[str, VideoMetadata] = {}
+        self.scan_thread: Optional[ScanThread] = None
+        self.fetch_thread: Optional[FetchMetadataThread] = None
+        self._active_qthreads: set[QThread] = set()
+        self._current_fetch_mode: str = "scan"
+        self._current_fetch_codes: list[str] = []
 
         # 创建日志窗口
         self.log_window = LogWindow(self)
@@ -330,9 +376,13 @@ class MainWindow(QMainWindow):
     def _create_toolbar(self):
         """创建工具栏"""
         widget = QWidget()
-        layout = QHBoxLayout()
-        layout.setContentsMargins(0, 0, 0, 0)
-        layout.setSpacing(6)
+        outer_layout = QVBoxLayout()
+        outer_layout.setContentsMargins(0, 0, 0, 4)
+        outer_layout.setSpacing(4)
+
+        # === 第一行：Logo + 核心操作 ===
+        row1 = QHBoxLayout()
+        row1.setSpacing(6)
 
         # Logo标签 - 粉色艺术字体
         logo_label = QLabel("🎀 JAV Lib Manager")
@@ -351,12 +401,12 @@ class MainWindow(QMainWindow):
             }
         """)
         logo_label.setToolTip("🎀 JAV Lib Manager - 您的个人视频收藏管理工具")
-        layout.addWidget(logo_label)
+        row1.addWidget(logo_label)
 
-        # 添加分隔线
-        separator = QLabel("│")
-        separator.setStyleSheet("color: #FFB6C1; font-size: 16px; padding: 0 3px;")
-        layout.addWidget(separator)
+        # 分隔线
+        sep1 = QLabel("│")
+        sep1.setStyleSheet("color: #FFB6C1; font-size: 16px; padding: 0 3px;")
+        row1.addWidget(sep1)
 
         # 扫描按钮
         self.scan_button = QPushButton("扫描")
@@ -390,21 +440,6 @@ class MainWindow(QMainWindow):
             pass
         self.log_button.clicked.connect(self.log_window.show)
 
-        # 重新下载封面按钮
-        self.retry_covers_button = QPushButton("📥 重新下载封面")
-        self.retry_covers_button.setToolTip("为没有封面的视频重新下载封面")
-        self.retry_covers_button.clicked.connect(self._retry_download_covers)
-
-        # 批量重定位按钮
-        self.batch_relocate_button = QPushButton("📂 批量重定位")
-        self.batch_relocate_button.setToolTip("批量重定位路径失效的视频文件")
-        self.batch_relocate_button.clicked.connect(self._batch_relocate_videos)
-
-        # 删除按钮
-        self.delete_button = QPushButton("🗑️ 删除选中")
-        self.delete_button.setToolTip("删除选中的视频记录（不会删除本地文件）")
-        self.delete_button.clicked.connect(self._delete_selected_videos)
-
         # 设置按钮
         self.settings_button = QPushButton("设置")
         try:
@@ -413,17 +448,59 @@ class MainWindow(QMainWindow):
             pass
         self.settings_button.clicked.connect(self._show_settings)
 
-        layout.addWidget(self.scan_button)
-        layout.addWidget(self.refresh_button)
-        layout.addWidget(self.stats_button)
-        layout.addWidget(self.log_button)
-        layout.addStretch()
-        layout.addWidget(self.delete_button)
-        layout.addWidget(self.batch_relocate_button)
-        layout.addWidget(self.retry_covers_button)
-        layout.addWidget(self.settings_button)
+        row1.addWidget(self.scan_button)
+        row1.addWidget(self.refresh_button)
+        row1.addWidget(self.stats_button)
+        row1.addWidget(self.log_button)
+        row1.addStretch()
+        row1.addWidget(self.settings_button)
 
-        widget.setLayout(layout)
+        outer_layout.addLayout(row1)
+
+        # === 第二行：工具操作 ===
+        row2 = QHBoxLayout()
+        row2.setSpacing(6)
+
+        # 停止任务按钮
+        self.stop_button = QPushButton("停止任务")
+        self.stop_button.clicked.connect(self._stop_current_task)
+
+        # 补全发行日期按钮
+        self.backfill_release_date_button = QPushButton("补全发行日期")
+        self.backfill_release_date_button.setToolTip("仅补全 release_date 为空的历史记录")
+        self.backfill_release_date_button.clicked.connect(self._backfill_missing_release_dates)
+
+        # 修复元数据按钮
+        self.repair_metadata_button = QPushButton("修复元数据")
+        self.repair_metadata_button.setToolTip("批量修复标题占位、封面缺失、演员缺失等异常记录")
+        self.repair_metadata_button.clicked.connect(self._repair_incomplete_metadata)
+
+        # 重新下载封面按钮
+        self.retry_covers_button = QPushButton("重新下载封面")
+        self.retry_covers_button.setToolTip("为没有封面的视频重新下载封面")
+        self.retry_covers_button.clicked.connect(self._retry_download_covers)
+
+        # 批量重定位按钮
+        self.batch_relocate_button = QPushButton("批量重定位")
+        self.batch_relocate_button.setToolTip("批量重定位路径失效的视频文件")
+        self.batch_relocate_button.clicked.connect(self._batch_relocate_videos)
+
+        # 删除按钮
+        self.delete_button = QPushButton("删除选中")
+        self.delete_button.setToolTip("删除选中的视频记录（不会删除本地文件）")
+        self.delete_button.clicked.connect(self._delete_selected_videos)
+
+        row2.addWidget(self.stop_button)
+        row2.addWidget(self.backfill_release_date_button)
+        row2.addWidget(self.repair_metadata_button)
+        row2.addWidget(self.retry_covers_button)
+        row2.addWidget(self.batch_relocate_button)
+        row2.addStretch()
+        row2.addWidget(self.delete_button)
+
+        outer_layout.addLayout(row2)
+
+        widget.setLayout(outer_layout)
         return widget
 
     def _create_search_panel(self):
@@ -510,6 +587,10 @@ class MainWindow(QMainWindow):
 
         # 工具菜单
         tools_menu = menubar.addMenu("工具(&T)")
+        tools_menu.addAction("停止任务(&S)", self._stop_current_task)
+        tools_menu.addAction("补全发行日期(&F)", self._backfill_missing_release_dates)
+        tools_menu.addAction("修复不完整元数据(&M)", self._repair_incomplete_metadata)
+        tools_menu.addSeparator()
         tools_menu.addAction("数据库统计(&D)", self._show_database_stats)
         tools_menu.addAction("清空数据库(&C)", self._clear_database)
 
@@ -552,6 +633,117 @@ class MainWindow(QMainWindow):
             '[%(levelname)s] %(message)s'
         ))
         root_logger.addHandler(console_handler)
+
+    def _register_thread(self, thread: QThread):
+        """注册线程，确保线程结束后从活动列表移除。"""
+        self._active_qthreads.add(thread)
+
+        def _cleanup():
+            self._active_qthreads.discard(thread)
+            if thread is self.scan_thread:
+                self.scan_thread = None
+            if thread is self.fetch_thread:
+                self.fetch_thread = None
+
+        thread.finished.connect(_cleanup)
+
+    def _stop_all_threads(self):
+        """请求停止并等待所有活动线程结束。"""
+        for thread in list(self._active_qthreads):
+            if hasattr(thread, "request_stop"):
+                try:
+                    thread.request_stop()
+                except Exception:
+                    pass
+        for thread in list(self._active_qthreads):
+            try:
+                thread.wait(5000)
+            except Exception:
+                pass
+
+    def closeEvent(self, event: QCloseEvent):
+        """窗口关闭时优雅停止后台线程，避免 QThread 销毁错误。"""
+        self._stop_all_threads()
+        try:
+            scraper = get_scraper()
+            if hasattr(scraper, "close"):
+                scraper.close()
+        except Exception as e:
+            self.logger.warning(f"关闭爬虫管理器失败: {e}")
+        super().closeEvent(event)
+
+    def _stop_current_task(self):
+        """停止当前扫描或抓取任务。"""
+        stopped_any = False
+        if self.scan_thread and self.scan_thread.isRunning():
+            self.scan_thread.request_stop()
+            stopped_any = True
+        if self.fetch_thread and self.fetch_thread.isRunning():
+            self.fetch_thread.request_stop()
+            stopped_any = True
+
+        if stopped_any:
+            self.statusBar().showMessage("正在停止任务...")
+        else:
+            self.statusBar().showMessage("当前没有正在运行的任务")
+
+    def _backfill_missing_release_dates(self):
+        """补全历史缺失发行日期（仅空值）。"""
+        missing_codes = self.db.get_videos_missing_release_date(limit=10000)
+        if not missing_codes:
+            QMessageBox.information(self, "提示", "没有缺失发行日期的视频")
+            return
+
+        reply = QMessageBox.question(
+            self,
+            "补全发行日期",
+            f"找到 {len(missing_codes)} 个缺失发行日期的视频。\n\n是否开始补全？（仅更新空值）",
+            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No
+        )
+        if reply != QMessageBox.StandardButton.Yes:
+            return
+
+        self._fetch_metadata(missing_codes, mode="backfill_release_date")
+
+    def _repair_incomplete_metadata(self):
+        """批量修复不完整或疑似假命中的元数据。"""
+        codes = self.db.get_videos_needing_metadata_refresh(limit=10000)
+        if not codes:
+            QMessageBox.information(self, "提示", "没有需要修复的元数据记录")
+            return
+
+        reply = QMessageBox.question(
+            self,
+            "修复元数据",
+            f"找到 {len(codes)} 条疑似不完整的记录。\n\n是否开始批量修复？",
+            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No
+        )
+        if reply != QMessageBox.StandardButton.Yes:
+            return
+
+        self._fetch_metadata(codes, mode="repair_metadata")
+
+    def _on_backfill_release_date_single(self, code: str, metadata):
+        """补全模式下单条处理：仅更新缺失发行日期。"""
+        if not metadata or not metadata.release_date:
+            return
+        updated = self.db.update_release_date_if_missing(code, metadata.release_date)
+        if updated:
+            self.logger.info(f"已补全发行日期: {code} -> {metadata.release_date}")
+
+    def _on_repair_metadata_single(self, code: str, metadata):
+        """修复模式下单条处理：更新现有记录并补下封面。"""
+        if not metadata:
+            return
+
+        updated = self.db.update_video_metadata(code, metadata)
+        if updated:
+            self.logger.info(f"已修复元数据: {code}")
+
+        current_video = self.db.get_video(code)
+        needs_cover = current_video and (not current_video.cover_path or not os.path.exists(current_video.cover_path))
+        if needs_cover and metadata.cover_url:
+            self._download_single_cover(code, metadata.cover_url)
 
     def _show_database_stats(self):
         """显示数据库统计"""
@@ -730,6 +922,10 @@ class MainWindow(QMainWindow):
 
     def _scan_directory(self):
         """扫描目录"""
+        if self.scan_thread and self.scan_thread.isRunning():
+            QMessageBox.information(self, "提示", "扫描任务正在运行，请先停止当前任务")
+            return
+
         # 选择目录
         last_dir = self.config.get('last_scan_dir', '')
         directory = QFileDialog.getExistingDirectory(
@@ -746,22 +942,32 @@ class MainWindow(QMainWindow):
 
         # 显示进度对话框
         progress_dialog = ScanProgressDialog(self)
+        progress_dialog.stop_requested.connect(self._stop_current_task)
         progress_dialog.show()
 
         # 创建扫描线程
         self.scan_thread = ScanThread(directory, recursive=self.config.get('scan_recursive', True))
+        self._register_thread(self.scan_thread)
         self.scan_thread.progress.connect(progress_dialog.update_progress)
-        self.scan_thread.finished.connect(lambda results: self._on_scan_finished(results, progress_dialog))
+        self.scan_thread.stopped.connect(lambda: self.statusBar().showMessage("扫描已停止"))
+        self.scan_thread.finished.connect(lambda results, t=self.scan_thread: self._on_scan_finished(results, progress_dialog, t))
         self.scan_thread.error.connect(lambda error: QMessageBox.critical(self, "扫描失败", error))
         self.scan_thread.start()
 
-    def _on_scan_finished(self, results: list[VideoFile], dialog: ScanProgressDialog):
+    def _on_scan_finished(self, results: list[VideoFile], dialog: ScanProgressDialog, thread: Optional[ScanThread] = None):
         """扫描完成"""
         self.scan_results = results
         parsed = [r for r in results if r.code]
 
         dialog.update_stats(len(results), len(parsed))
-        dialog.status_label.setText("扫描完成！")
+        was_stopped = bool(thread and thread.was_stopped())
+        dialog.status_label.setText("已停止" if was_stopped else "扫描完成！")
+
+        if was_stopped:
+            dialog.accept()
+            self._refresh_video_list()
+            self.statusBar().showMessage(f"扫描已停止，已处理 {len(results)} 个文件")
+            return
 
         # 检查哪些已存在于数据库
         existing_codes = []
@@ -827,20 +1033,32 @@ class MainWindow(QMainWindow):
                 dialog.accept()
                 self._fetch_metadata([r.code for r in parsed if r.code])
 
-    def _fetch_metadata(self, codes: list[str]):
+    def _fetch_metadata(self, codes: list[str], mode: str = "scan"):
         """获取元数据"""
         if not codes:
             QMessageBox.information(self, "提示", "没有需要获取元数据的番号")
             return
+        if self.fetch_thread and self.fetch_thread.isRunning():
+            QMessageBox.information(self, "提示", "元数据抓取任务正在运行，请先停止当前任务")
+            return
 
         # 显示进度
         self.statusBar().showMessage(f"正在获取 {len(codes)} 个视频的元数据...")
+        self._current_fetch_mode = mode
+        self._current_fetch_codes = list(codes)
 
         # 创建获取线程
         self.fetch_thread = FetchMetadataThread(codes)
+        self._register_thread(self.fetch_thread)
         self.fetch_thread.progress.connect(lambda code, status: self.statusBar().showMessage(f"{code}: {status}"))
-        self.fetch_thread.metadata_fetched.connect(self._on_single_metadata)  # 实时保存
-        self.fetch_thread.finished.connect(self._on_metadata_finished)
+        if mode == "backfill_release_date":
+            self.fetch_thread.metadata_fetched.connect(self._on_backfill_release_date_single)
+        elif mode == "repair_metadata":
+            self.fetch_thread.metadata_fetched.connect(self._on_repair_metadata_single)
+        else:
+            self.fetch_thread.metadata_fetched.connect(self._on_single_metadata)  # 实时保存
+        self.fetch_thread.stopped.connect(lambda: self.statusBar().showMessage("元数据抓取已停止"))
+        self.fetch_thread.finished.connect(lambda results, t=self.fetch_thread: self._on_metadata_finished(results, t))
         self.fetch_thread.error.connect(lambda code, error: self.logger.error(f"获取 {code} 元数据失败: {error}"))
         self.fetch_thread.start()
 
@@ -854,8 +1072,36 @@ class MainWindow(QMainWindow):
             if metadata.cover_url:
                 self._download_single_cover(code, metadata.cover_url)
 
-    def _on_metadata_finished(self, results: dict[str, VideoMetadata]):
+    def _on_metadata_finished(self, results: dict[str, VideoMetadata], thread: Optional[FetchMetadataThread] = None):
         """元数据获取完成 - 处理未找到的"""
+        mode = self._current_fetch_mode
+        was_stopped = bool(thread and thread.was_stopped())
+
+        if mode == "backfill_release_date":
+            self._refresh_video_list()
+            status_msg = (
+                f"发行日期补全已停止，已处理 {len(results)}/{len(self._current_fetch_codes)}"
+                if was_stopped
+                else f"发行日期补全完成，已处理 {len(results)} 条"
+            )
+            self.statusBar().showMessage(status_msg)
+            return
+
+        if mode == "repair_metadata":
+            self._refresh_video_list()
+            status_msg = (
+                f"元数据修复已停止，已处理 {len(results)}/{len(self._current_fetch_codes)}"
+                if was_stopped
+                else f"元数据修复完成，已处理 {len(results)} 条"
+            )
+            self.statusBar().showMessage(status_msg)
+            return
+
+        if was_stopped:
+            self._refresh_video_list()
+            self.statusBar().showMessage(f"元数据抓取已停止，已处理 {len(results)}/{len(self._current_fetch_codes)}")
+            return
+
         self.logger.info(f"=== _on_metadata_finished 被调用，results 大小: {len(results)} ===")
         not_found = []
 
@@ -1273,12 +1519,18 @@ class MainWindow(QMainWindow):
 
     def _fetch_missing_metadata(self, video_ids: list[str], covers_dict: dict[str, str]):
         """为没有封面URL的视频获取元数据（在后台线程执行）"""
+        if self.fetch_thread and self.fetch_thread.isRunning():
+            QMessageBox.information(self, "提示", "已有元数据抓取任务正在运行，请稍后重试")
+            return
+
         # 使用已有的 FetchMetadataThread
-        thread = FetchMetadataThread(video_ids)
-        thread.metadata_fetched.connect(lambda code, metadata: self._on_metadata_fetched_for_cover(code, metadata, covers_dict))
-        thread.finished.connect(lambda results: self._on_fetch_metadata_finished_impl(video_ids, results, covers_dict))
-        thread.error.connect(lambda code, error: self.logger.error(f"获取元数据出错 {code}: {error}"))
-        thread.start()
+        self.fetch_thread = FetchMetadataThread(video_ids)
+        self._register_thread(self.fetch_thread)
+        self.fetch_thread.metadata_fetched.connect(lambda code, metadata: self._on_metadata_fetched_for_cover(code, metadata, covers_dict))
+        self.fetch_thread.finished.connect(lambda results: self._on_fetch_metadata_finished_impl(video_ids, results, covers_dict))
+        self.fetch_thread.stopped.connect(lambda: self.statusBar().showMessage("封面补全元数据任务已停止"))
+        self.fetch_thread.error.connect(lambda code, error: self.logger.error(f"获取元数据出错 {code}: {error}"))
+        self.fetch_thread.start()
 
     def _on_metadata_fetched_for_cover(self, code: str, metadata, covers_dict: dict[str, str]):
         """元数据获取成功回调"""

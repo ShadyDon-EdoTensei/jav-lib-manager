@@ -6,7 +6,11 @@ body:
   - type: markdown
     attributes:
       value: |
-        Thanks for taking the time to report this issue.
+        # 🎀 JAV Lib Manager Bug Report
+
+        Thanks for taking the time to report this issue. Please fill out the form below to help us understand and reproduce the problem.
+
+        ---
   - type: textarea
     id: what-happened
     attributes:

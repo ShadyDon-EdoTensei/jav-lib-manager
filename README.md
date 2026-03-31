@@ -70,34 +70,41 @@
 #### Method 1: Using Git (Recommended)
 
 ```bash
-# Clone the repository
-git clone https://github.com/ShadyDon/jav-lib-manager.git
+# 1. Verify Python version (must be 3.9+)
+python --version
+
+# 2. Clone the repository
+git clone https://github.com/ShadyDon-EdoTensei/jav-lib-manager.git
 cd jav-lib-manager
 
-# (Optional) Create virtual environment
+# 3. (Optional) Create virtual environment
 python -m venv venv
 venv\Scripts\activate
 
-# Install dependencies
+# 4. Install Python dependencies
 pip install -r requirements.txt
 
-# Install Playwright browser engine
+# 5. Install Playwright browser engine (~300MB, one-time download)
 playwright install chromium
 
-# Launch the application
+# 6. Launch the application
 python run_app.py
 ```
 
-#### Method 2: Download ZIP
+#### Method 2: Download ZIP (No Git Required)
 
-1. Go to [Releases](https://github.com/ShadyDon/jav-lib-manager/releases) and download the latest ZIP
-2. Extract to any folder
-3. Open a terminal in that folder and run:
+1. Go to [Releases](https://github.com/ShadyDon-EdoTensei/jav-lib-manager/releases) and download the latest ZIP
+2. Extract to any folder (e.g. `C:\jav-lib-manager\`)
+3. Open **Command Prompt** or **PowerShell** in that folder
+4. Run these commands:
 ```bash
+python --version          # Verify Python 3.9+
 pip install -r requirements.txt
 playwright install chromium
 python run_app.py
 ```
+
+> **Tip:** If `python` is not recognized, you need to install Python first and check "Add Python to PATH" during installation.
 
 ---
 
@@ -273,8 +280,8 @@ Try these steps in order:
 
 If the problem persists and the mirror is permanently down, the scraper URLs need to be updated. **Contact the author for the latest version:**
 
-- 📧 Email: **1840630471@qq.com**
-- 🐛 GitHub Issues: [github.com/ShadyDon/jav-lib-manager/issues](https://github.com/ShadyDon/jav-lib-manager/issues)
+- 📧 Email: **ShadyDon-EdoTensein@users.noreply.github.com**
+- 🐛 GitHub Issues: [github.com/ShadyDon-EdoTensei/jav-lib-manager/issues](https://github.com/ShadyDon-EdoTensei/jav-lib-manager/issues)
 
 **Q: Covers are not showing up**
 

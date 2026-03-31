@@ -6,7 +6,11 @@ body:
   - type: markdown
     attributes:
       value: |
-        Thanks for sharing your idea.
+        # 🎀 JAV Lib Manager Feature Request
+
+        Thanks for sharing your idea! Please fill out the form below to help us understand your suggestion.
+
+        ---
   - type: textarea
     id: problem
     attributes:

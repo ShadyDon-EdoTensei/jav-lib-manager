@@ -28,9 +28,9 @@ Welcome to the official documentation for JAV Lib Manager.
 
 ## Quick Links
 
-- **GitHub Repository**: [https://github.com/yourusername/jav-lib-manager](https://github.com/yourusername/jav-lib-manager)
-- **Issue Tracker**: [https://github.com/yourusername/jav-lib-manager/issues](https://github.com/yourusername/jav-lib-manager/issues)
-- **Releases**: [https://github.com/yourusername/jav-lib-manager/releases](https://github.com/yourusername/jav-lib-manager/releases)
+- **GitHub Repository**: [https://github.com/ShadyDon-EdoTensei/jav-lib-manager](https://github.com/ShadyDon-EdoTensei/jav-lib-manager)
+- **Issue Tracker**: [https://github.com/ShadyDon-EdoTensei/jav-lib-manager/issues](https://github.com/ShadyDon-EdoTensei/jav-lib-manager/issues)
+- **Releases**: [https://github.com/ShadyDon-EdoTensei/jav-lib-manager/releases](https://github.com/ShadyDon-EdoTensei/jav-lib-manager/releases)
 
 ---
 

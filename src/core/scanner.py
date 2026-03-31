@@ -34,7 +34,8 @@ class VideoScanner:
         self,
         directory: str,
         progress_callback: Optional[Callable[[str, int, int], None]] = None,
-        recursive: bool = True
+        recursive: bool = True,
+        should_stop: Optional[Callable[[], bool]] = None
     ) -> List[VideoFile]:
         """
         扫描目录，返回视频文件列表
@@ -67,6 +68,9 @@ class VideoScanner:
         total_count = len(all_files)
 
         for i, file_path in enumerate(all_files):
+            if should_stop and should_stop():
+                break
+
             # 进度回调
             if progress_callback:
                 progress_callback(file_path, i + 1, total_count)
@@ -103,13 +107,15 @@ class VideoScanner:
         self,
         directory: str,
         progress_callback: Optional[Callable[[str, int, int], None]] = None,
-        recursive: bool = True
+        recursive: bool = True,
+        should_stop: Optional[Callable[[], bool]] = None
     ) -> List[VideoFile]:
         """兼容旧接口：调用 scan_directory。"""
         return self.scan_directory(
             directory=directory,
             progress_callback=progress_callback,
-            recursive=recursive
+            recursive=recursive,
+            should_stop=should_stop
         )
 
     def scan_single_file(self, file_path: str) -> Optional[VideoFile]:

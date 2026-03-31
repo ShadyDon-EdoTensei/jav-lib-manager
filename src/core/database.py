@@ -495,6 +495,64 @@ class Database:
 
             return results
 
+    def get_videos_missing_release_date(self, limit: int = 1000, offset: int = 0) -> List[str]:
+        """获取发行日期缺失的视频 ID 列表。"""
+        with self._get_connection() as conn:
+            cursor = conn.cursor()
+            cursor.execute(
+                """
+                SELECT id FROM videos
+                WHERE release_date IS NULL OR release_date = ''
+                ORDER BY created_at DESC
+                LIMIT ? OFFSET ?
+                """,
+                (limit, offset)
+            )
+            return [row["id"] for row in cursor.fetchall()]
+
+    def get_videos_needing_metadata_refresh(self, limit: int = 1000, offset: int = 0) -> List[str]:
+        """获取疑似元数据不完整或假命中的视频 ID 列表。"""
+        with self._get_connection() as conn:
+            cursor = conn.cursor()
+            cursor.execute(
+                """
+                SELECT v.id
+                FROM videos v
+                LEFT JOIN video_actresses va ON v.id = va.video_id
+                GROUP BY v.id
+                HAVING
+                    COALESCE(v.title, '') = v.id
+                    OR (COALESCE(v.cover_url, '') = '' AND COALESCE(v.cover_path, '') = '')
+                    OR COUNT(va.actress_id) = 0
+                    OR COALESCE(v.studio, '') LIKE '%磁鏈搜索引擎%'
+                    OR COALESCE(v.studio, '') LIKE '%關注演員%'
+                    OR COALESCE(v.studio, '') LIKE '%功能增強%'
+                    OR COALESCE(v.studio, '') LIKE '%Attention Required%'
+                    OR COALESCE(v.studio, '') LIKE '%Cloudflare%'
+                ORDER BY MAX(v.updated_at) DESC
+                LIMIT ? OFFSET ?
+                """,
+                (limit, offset)
+            )
+            return [row["id"] for row in cursor.fetchall()]
+
+    def update_release_date_if_missing(self, video_id: str, release_date: date) -> bool:
+        """仅在当前发行日期为空时更新。"""
+        if release_date is None:
+            return False
+
+        with self._get_connection() as conn:
+            cursor = conn.cursor()
+            cursor.execute(
+                """
+                UPDATE videos
+                SET release_date = ?, updated_at = CURRENT_TIMESTAMP
+                WHERE id = ? AND (release_date IS NULL OR release_date = '')
+                """,
+                (release_date.isoformat(), video_id)
+            )
+            return cursor.rowcount > 0
+
     def count_videos(self) -> int:
         """获取视频总数"""
         with self._get_connection() as conn:

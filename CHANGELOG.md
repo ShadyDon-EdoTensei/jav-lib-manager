@@ -48,5 +48,5 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Python: 3.9+
 - Platform: Windows 10/11
 
-[Unreleased]: https://github.com/ShadyDon/jav-lib-manager/compare/v1.0.0...HEAD
-[1.0.0]: https://github.com/ShadyDon/jav-lib-manager/releases/tag/v1.0.0
+[Unreleased]: https://github.com/ShadyDon-EdoTensei/jav-lib-manager/compare/v1.0.0...HEAD
+[1.0.0]: https://github.com/ShadyDon-EdoTensei/jav-lib-manager/releases/tag/v1.0.0

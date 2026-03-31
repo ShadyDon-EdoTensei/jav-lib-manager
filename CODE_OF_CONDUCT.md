@@ -84,5 +84,14 @@ enforcement ladder](https://github.com/mozilla/diversity).
 
 ---
 
+## 联系方式
+
+如果你有关于行为准则的问题或需要报告违反行为准则的情况，请联系项目维护者：
+
+- **邮箱**: ShadyDon-EdoTensein@users.noreply.github.com
+- **GitHub Issues**: https://github.com/ShadyDon-EdoTensei/jav-lib-manager/issues
+
+---
+
 **Please note:** This project is focused on video library management software.
 Discussions should remain technical and professional in nature.

@@ -6,7 +6,7 @@ import random
 import logging
 from abc import ABC, abstractmethod
 from typing import Optional
-from datetime import datetime
+from datetime import datetime, date
 from pathlib import Path
 
 import requests
@@ -16,6 +16,38 @@ from .models import VideoMetadata, SourceType
 from .parser import get_parser
 
 logger = logging.getLogger(__name__)
+
+
+def _parse_release_date(value: Optional[str]) -> Optional[date]:
+    """??????????"""
+    if not value:
+        return None
+
+    value = value.strip()
+    formats = ("%Y-%m-%d", "%Y/%m/%d", "%Y.%m.%d")
+    for fmt in formats:
+        try:
+            return datetime.strptime(value, fmt).date()
+        except ValueError:
+            continue
+
+    return None
+
+
+def _normalize_image_url(url: Optional[str], base_url: str) -> Optional[str]:
+    """标准化图片 URL，兼容相对路径和协议相对路径。"""
+    if not url:
+        return None
+
+    url = url.strip()
+    if not url:
+        return None
+
+    if url.startswith("//"):
+        return f"https:{url}"
+    if url.startswith("/"):
+        return f"{base_url.rstrip('/')}{url}"
+    return url
 
 
 class BaseScraper(ABC):
@@ -222,15 +254,29 @@ class JavDBScraper(BaseScraper):
 
     def _extract_cover(self, tree) -> Optional[str]:
         """提取封面URL"""
-        # 封面通常在 .column-video-cover .video-cover img 下
-        cover_elem = tree.cssselect('.column-video-cover img')
-        if cover_elem:
-            return cover_elem[0].get('src') or cover_elem[0].get('data-src')
+        selectors = [
+            '.column-video-cover img',
+            '.video-cover img',
+            'a.bigImage img',
+            '.tile-images img',
+        ]
+        for selector in selectors:
+            cover_elem = tree.cssselect(selector)
+            if not cover_elem:
+                continue
 
-        # 备选: 检查 meta og:image
+            raw_url = (
+                cover_elem[0].get('data-src')
+                or cover_elem[0].get('src')
+                or cover_elem[0].get('data-fancybox')
+            )
+            normalized = _normalize_image_url(raw_url, self.BASE_URL)
+            if normalized:
+                return normalized
+
         og_image = tree.cssselect('meta[property="og:image"]')
         if og_image:
-            return og_image[0].get('content')
+            return _normalize_image_url(og_image[0].get('content'), self.BASE_URL)
 
         return None
 
@@ -747,6 +793,86 @@ class JavCLScraper(BaseScraper):
         )
 
 
+class VectorSideCoScraper(BaseScraper):
+    """Fallback scraper backed by vectorsideco.com search pages."""
+
+    BASE_URL = "https://www.vectorsideco.com"
+    SEARCH_URL = f"{BASE_URL}/?s={{code}}"
+
+    def __init__(self):
+        super().__init__(delay_range=(0.2, 0.8))
+
+    def fetch(self, code: str) -> Optional[VideoMetadata]:
+        search_url = self.SEARCH_URL.format(code=code)
+        response = self._request(search_url, timeout=20)
+        if not response:
+            return None
+
+        tree = html.fromstring(response.content)
+        article_urls = tree.xpath('//a[contains(@href, "/archives/")]/@href')
+        detail_url = None
+        for url in article_urls:
+            if not url or "/archives/category/" in url:
+                continue
+            detail_url = url
+            break
+
+        if not detail_url:
+            return None
+
+        response = self._request(detail_url, timeout=20)
+        if not response:
+            return None
+
+        tree = html.fromstring(response.content)
+        title_text = tree.xpath('string(//h1)').strip()
+        description = tree.xpath('string(//meta[@name="description"]/@content)').strip()
+        page_text = " ".join(filter(None, [title_text, description]))
+        if code.upper() not in page_text.upper():
+            return None
+
+        actresses = []
+        actress_links = tree.xpath('//a[contains(@href, "/tag/")]/text()')
+        for name in actress_links:
+            name = name.strip()
+            if not name or code.upper() in name.upper():
+                continue
+            if name not in actresses:
+                actresses.append(name)
+
+        if not actresses:
+            actress_match = re.search(r'^([^：:]+?)[的:：].*番号', title_text)
+            if actress_match:
+                actress_name = actress_match.group(1).strip()
+                if actress_name:
+                    actresses.append(actress_name)
+
+        image_urls = tree.xpath('//article//img/@src')
+        cover_url = None
+        for image_url in image_urls:
+            normalized = _normalize_image_url(image_url, self.BASE_URL)
+            if not normalized:
+                continue
+            if 'logo' in normalized or 'thumbnail' in normalized:
+                continue
+            cover_url = normalized
+            break
+
+        return VideoMetadata(
+            id=code,
+            title=code,
+            cover_url=cover_url,
+            actresses=actresses,
+            studio=None,
+            label=None,
+            series=None,
+            genres=[],
+            release_date=None,
+            duration=None,
+            source=SourceType.JAVDB
+        )
+
+
 class AVWikiScraper(BaseScraper):
     """AV Wiki爬虫 - av-wiki.net (目前最稳定可访问)"""
 
@@ -873,17 +999,24 @@ class JavDBPlaywrightScraper(BaseScraper):
 
             if metadata:
                 logger.info(f"[Playwright] 成功获取 {code}: {metadata.title[:50]}")
+                raw_release_date = getattr(metadata, "release_date", None)
+                parsed_release_date = _parse_release_date(raw_release_date) if raw_release_date else None
+                if raw_release_date and not parsed_release_date:
+                    logger.warning(f"[Playwright] 无法解析发行日期: {code} -> {raw_release_date}")
+
                 # 转换为VideoMetadata格式
+                normalized_cover_url = _normalize_image_url(metadata.cover_url, self.BASE_URL)
+
                 return VideoMetadata(
                     id=metadata.id,
                     title=metadata.title,
-                    cover_url=metadata.cover_url,
+                    cover_url=normalized_cover_url,
                     actresses=metadata.actresses,
                     studio=metadata.studio,
                     label=metadata.label,
                     series=metadata.series,
                     genres=metadata.genres,
-                    release_date=None,  # JavDB返回的是字符串，暂不转换
+                    release_date=parsed_release_date,
                     duration=None,      # JavDB返回的是字符串，暂不转换
                     source=SourceType.JAVDB
                 )
@@ -915,10 +1048,69 @@ class ScraperManager:
             JavDBMirrorScraper(),       # 备用: JavDB镜像 (javdb.vip)
             JavDBScraper(),             # 备用: JavDB主站
             JavCLScraper(),             # 备用: JavCL (英文站点)
+            VectorSideCoScraper(),      # 备用: 第三方索引，可补演员/封面
             AVWikiScraper(),            # 备用: AV Wiki (日文站点)
             JavBusScraper(),            # 备用: JavBus (多镜像)
             FANZAScraper(),             # 备用: FANZA (需要日本IP)
         ]
+
+    @staticmethod
+    def _looks_like_placeholder(metadata: VideoMetadata, code: str) -> bool:
+        """Filter obvious anti-bot / landing-page false positives."""
+        title = (metadata.title or "").strip()
+        studio = (metadata.studio or "").strip()
+
+        suspicious_studio_markers = [
+            "磁鏈搜索引擎",
+            "關注演員",
+            "功能增強",
+            "Attention Required",
+            "Cloudflare",
+        ]
+        if any(marker in studio for marker in suspicious_studio_markers):
+            return True
+
+        has_real_title = bool(title) and title.upper() != code.upper()
+        has_useful_fields = bool(
+            metadata.cover_url or metadata.actresses or metadata.release_date or metadata.duration or metadata.genres
+        )
+
+        return not has_real_title and not has_useful_fields
+
+    @staticmethod
+    def _merge_metadata(base: Optional[VideoMetadata], incoming: VideoMetadata) -> VideoMetadata:
+        """Merge sparse fallback results into one metadata object."""
+        if base is None:
+            return incoming
+
+        base.title = incoming.title if incoming.title and incoming.title != incoming.id else base.title
+        base.cover_url = incoming.cover_url or base.cover_url
+        base.studio = incoming.studio or base.studio
+        base.label = incoming.label or base.label
+        base.series = incoming.series or base.series
+        base.release_date = incoming.release_date or base.release_date
+        base.duration = incoming.duration or base.duration
+
+        for actress in incoming.actresses:
+            if actress and actress not in base.actresses:
+                base.actresses.append(actress)
+
+        for genre in incoming.genres:
+            if genre and genre not in base.genres:
+                base.genres.append(genre)
+
+        return base
+
+    @staticmethod
+    def _is_metadata_sufficient(metadata: VideoMetadata, code: str) -> bool:
+        """Stop once core fields are present and no longer placeholder-like."""
+        if ScraperManager._looks_like_placeholder(metadata, code):
+            return False
+
+        has_title = bool(metadata.title) and metadata.title.upper() != code.upper()
+        has_cover = bool(metadata.cover_url)
+        has_context = bool(metadata.actresses or metadata.release_date or metadata.genres or metadata.duration)
+        return has_title and has_cover and has_context
 
     def close(self):
         """关闭所有爬虫"""
@@ -936,16 +1128,29 @@ class ScraperManager:
         Returns:
             VideoMetadata 或 None
         """
+        merged_metadata: Optional[VideoMetadata] = None
+
         for i, scraper in enumerate(self.scrapers, 1):
             try:
                 logger.info(f"尝试数据源 {i}/{len(self.scrapers)}: {scraper.__class__.__name__}")
                 metadata = scraper.fetch(code)
                 if metadata:
+                    if self._looks_like_placeholder(metadata, code):
+                        logger.warning(f"跳过疑似假结果: {scraper.__class__.__name__} -> {code}")
+                        continue
+
+                    merged_metadata = self._merge_metadata(merged_metadata, metadata)
                     logger.info(f"✓ 成功从 {scraper.__class__.__name__} 获取 {code}")
-                    return metadata
+
+                    if self._is_metadata_sufficient(merged_metadata, code):
+                        return merged_metadata
             except Exception as e:
                 logger.error(f"✗ {scraper.__class__.__name__} 失败: {e}", exc_info=True)
                 continue
+
+        if merged_metadata:
+            logger.info(f"返回合并后的元数据: {code}")
+            return merged_metadata
 
         logger.warning(f"所有数据源均未找到: {code}")
         return None
