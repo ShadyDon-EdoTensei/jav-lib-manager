@@ -25,6 +25,7 @@
 
 - 🔍 **Smart Scanning** — Automatically scan directories and extract video IDs from filenames
 - 🌐 **Metadata Fetching** — Fetch cover images, actress info, and tags from JavDB
+- 👩 **Actress Avatars** — Browse 945+ actress profiles with avatar photos, cup size, height and birth year
 - 🏷️ **Multi-dimensional Search** — Filter by video ID, actress, tag, or studio
 - 📺 **Modern UI** — Beautiful PyQt6-based interface with 18 Material Design themes
 - 💾 **Local Database** — SQLite storage supporting large collections
@@ -147,8 +148,17 @@ Once metadata is fetched, your videos will appear as cards with covers. Click an
 
 Click any video card to open the detail panel:
 - **Cover image** — click it to view full-size
-- **Actress list**, **Tags**, **Studio**, **Label**, **Series**
+- **Actress names** — click to view actress avatar and profile (cup size, height, birth year)
+- **Tags**, **Studio**, **Label**, **Series**
 - **File path** and file size
+
+#### Actress Avatars
+
+1. Click the **"女优头像"** button in the toolbar to open the actress browser
+2. Browse 945+ actress cards with avatars, filter by name or "has avatar"
+3. Click **"下载所有头像"** to batch download all missing avatars
+4. In the video detail panel, actress names are clickable links to view their avatar and info
+5. Double-click an actress card to filter the main video list by that actress
 
 #### Changing Theme
 
@@ -207,14 +217,18 @@ jav-lib-manager/
 │   │   ├── scraper.py        # Metadata scraper
 │   │   ├── javdb_scraper.py  # JavDB Playwright scraper
 │   │   ├── database.py       # SQLite database
-│   │   └── cover_downloader.py
+│   │   ├── cover_downloader.py
+│   │   └── avatar_downloader.py
 │   └── utils/
 │       ├── config.py
 │       └── logger.py
 ├── tests/                    # Test suite
 └── data/                     # Runtime data (gitignored)
     ├── library.db
-    └── images/covers/
+    ├── actress_data.json    # 945 actress profiles
+    └── images/
+        ├── covers/
+        └── avatars/
 ```
 
 ---

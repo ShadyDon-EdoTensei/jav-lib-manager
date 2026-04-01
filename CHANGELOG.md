@@ -7,6 +7,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+- 女优头像浏览功能 — 945名女优资料数据（头像URL、罩杯、身高、出生年）
+- 工具栏"女优头像"按钮，支持批量下载头像到本地
+- 视频详情面板中女优名字可点击，直接查看头像和资料
+- 女优头像浏览对话框，支持搜索、筛选、双击过滤作品
+- `avatar_downloader.py` — 头像下载与缓存管理模块
+- `actress_dialog.py` — 女优头像浏览对话框
+- 数据库新增 `update_actress_avatar()` 和 `get_actress_avatar()` 方法
+
 ### Removed
 - 男演员筛选功能（不再需要）
 - `GenderType` 类和相关代码
