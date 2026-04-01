@@ -24,6 +24,7 @@ from core.scraper import get_scraper
 from core.models import VideoMetadata
 from gui.themes.theme_manager import ThemeManager
 from gui.dialogs.settings_dialog import SettingsDialog
+from gui.dialogs.actress_dialog import ActressDialog
 from utils.config import get_config
 from utils.logger import get_logger
 
@@ -324,6 +325,7 @@ class MainWindow(QMainWindow):
         self.detail_panel = QLabel()
         self.detail_panel.setAlignment(Qt.AlignmentFlag.AlignTop | Qt.AlignmentFlag.AlignLeft)
         self.detail_panel.setWordWrap(True)
+        self.detail_panel.linkActivated.connect(self._on_detail_link_clicked)
         detail_layout.addWidget(self.detail_panel)
 
         # 播放按钮（初始隐藏）
@@ -480,6 +482,15 @@ class MainWindow(QMainWindow):
         self.retry_covers_button.setToolTip("为没有封面的视频重新下载封面")
         self.retry_covers_button.clicked.connect(self._retry_download_covers)
 
+        # 女优头像按钮
+        self.actress_avatar_button = QPushButton("女优头像")
+        try:
+            self.actress_avatar_button.setIcon(qtawesome.icon('fa5s.user-circle'))
+        except:
+            pass
+        self.actress_avatar_button.setToolTip("浏览女优头像和资料")
+        self.actress_avatar_button.clicked.connect(self._show_actress_dialog)
+
         # 批量重定位按钮
         self.batch_relocate_button = QPushButton("批量重定位")
         self.batch_relocate_button.setToolTip("批量重定位路径失效的视频文件")
@@ -494,6 +505,7 @@ class MainWindow(QMainWindow):
         row2.addWidget(self.backfill_release_date_button)
         row2.addWidget(self.repair_metadata_button)
         row2.addWidget(self.retry_covers_button)
+        row2.addWidget(self.actress_avatar_button)
         row2.addWidget(self.batch_relocate_button)
         row2.addStretch()
         row2.addWidget(self.delete_button)
@@ -1166,13 +1178,31 @@ class MainWindow(QMainWindow):
             self.current_video_path = video.file_path
 
             # 构建详情HTML
-            actresses_str = ", ".join([a.name for a in video.actresses])
             tags_str = ", ".join(video.tags) if video.tags else "无"
+
+            # 演员名带可点击链接 + 头像小图标
+            from core.avatar_downloader import AvatarDownloader
+            _av_dl = AvatarDownloader()
+            actress_parts = []
+            for a in video.actresses:
+                avatar_path = self.db.get_actress_avatar(a.name)
+                if avatar_path and os.path.exists(avatar_path):
+                    # 用本地文件路径显示头像缩略图
+                    actress_parts.append(
+                        f'<img src="{avatar_path}" width="28" height="28" style="vertical-align:middle; border-radius:14px;"> '
+                        f'<a href="actress:{a.name}" style="color:#FF69B4;text-decoration:none;">{a.name}</a>'
+                    )
+                else:
+                    actress_parts.append(
+                        f'<a href="actress:{a.name}" style="color:#FF69B4;text-decoration:none;">{a.name}</a>'
+                    )
+            _av_dl.close()
+            actresses_html = "&nbsp;&nbsp;".join(actress_parts) if actress_parts else "未知"
 
             detail_html = f"""
             <h2>{video.id}</h2>
             <h3>{video.title}</h3>
-            <p><b>演员:</b> {actresses_str}</p>
+            <p><b>演员:</b><br>{actresses_html}</p>
             <p><b>片商:</b> {video.studio or '未知'}</p>
             <p><b>发行:</b> {video.label or '未知'}</p>
             <p><b>系列:</b> {video.series or '无'}</p>
@@ -1411,6 +1441,129 @@ class MainWindow(QMainWindow):
 
             # 刷新列表
             self._refresh_video_list()
+
+    def _show_actress_dialog(self):
+        """下载所有女优头像并更新数据库"""
+        from core.avatar_downloader import AvatarDownloader
+
+        db = self.db
+
+        # 先确认
+        reply = QMessageBox.question(
+            self, "下载女优头像",
+            "将从数据库下载 945 名女优的头像并更新数据库记录。\n已下载的会自动跳过。\n\n是否继续？",
+            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No
+        )
+        if reply != QMessageBox.StandardButton.Yes:
+            return
+
+        self.actress_avatar_button.setEnabled(False)
+        self.actress_avatar_button.setText("下载中...")
+
+        def _do_download():
+            dl = AvatarDownloader()
+            data = dl.load_actress_data()
+            downloaded = 0
+            updated = 0
+            skipped = 0
+
+            for i, actress in enumerate(data):
+                name = actress['name']
+                url = actress.get('avatar_url', '')
+
+                if not url or 'actor_unknow' in url:
+                    skipped += 1
+                    continue
+
+                # 下载头像
+                local_path = dl.download_avatar(name, url)
+
+                if local_path:
+                    downloaded += 1
+                    # 更新数据库
+                    if db.update_actress_avatar(name, local_path):
+                        updated += 1
+                else:
+                    skipped += 1
+
+                # 更新进度
+                progress_text = f"女优头像下载: {i+1}/{len(data)} (已下载{downloaded})"
+                QTimer.singleShot(0, lambda t=progress_text: self.statusBar().showMessage(t))
+
+            dl.close()
+            summary = f"头像下载完成: 共下载 {downloaded} 个, 更新数据库 {updated} 条, 跳过 {skipped} 个"
+            QTimer.singleShot(0, lambda: self._on_avatar_download_finished(summary))
+
+        import threading
+        t = threading.Thread(target=_do_download, daemon=True)
+        t.start()
+
+    def _on_avatar_download_finished(self, summary: str):
+        """头像下载完成回调"""
+        self.actress_avatar_button.setEnabled(True)
+        self.actress_avatar_button.setText("女优头像")
+        self.statusBar().showMessage(summary)
+        self._refresh_video_list()
+        QMessageBox.information(self, "完成", summary)
+
+    def _on_actress_selected_from_dialog(self, actress_name: str):
+        """从女优对话框选中后，在主窗口过滤该女优的作品"""
+        # 设置演员下拉框
+        index = self.actress_combo.findText(actress_name)
+        if index >= 0:
+            self.actress_combo.setCurrentIndex(index)
+        else:
+            self.actress_combo.setCurrentText(actress_name)
+        self._on_search()
+
+    def _on_detail_link_clicked(self, link: str):
+        """详情面板中的链接点击 - 查看女优头像大图"""
+        if link.startswith("actress:"):
+            actress_name = link[len("actress:"):]
+            from core.avatar_downloader import AvatarDownloader
+            dl = AvatarDownloader()
+            avatar_path = dl.get_avatar_path(actress_name)
+            info = dl.get_actress_info(actress_name)
+            dl.close()
+
+            # 弹窗显示头像大图 + 信息
+            dialog = QDialog(self)
+            dialog.setWindowTitle(actress_name)
+            layout = QVBoxLayout(dialog)
+
+            if avatar_path and os.path.exists(avatar_path):
+                pixmap = QPixmap(avatar_path)
+                if not pixmap.isNull():
+                    screen = QApplication.primaryScreen().availableGeometry()
+                    max_w = min(500, screen.width() - 100)
+                    max_h = min(600, screen.height() - 100)
+                    scaled = pixmap.scaled(max_w, max_h, Qt.AspectRatioMode.KeepAspectRatio, Qt.TransformationMode.SmoothTransformation)
+                    img_label = QLabel()
+                    img_label.setPixmap(scaled)
+                    img_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
+                    layout.addWidget(img_label)
+
+            # 信息
+            if info:
+                info_text = actress_name
+                if info.get('cup'):
+                    info_text += f"  |  罩杯: {info['cup']}"
+                if info.get('height'):
+                    info_text += f"  |  身高: {info['height']}cm"
+                if info.get('birth_year'):
+                    info_text += f"  |  出生: {info['birth_year']}年"
+                info_label = QLabel(info_text)
+                info_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
+                info_label.setStyleSheet("font-size: 14px; padding: 8px;")
+                layout.addWidget(info_label)
+
+            if not avatar_path or not os.path.exists(avatar_path):
+                no_img = QLabel("暂无头像\n可点击工具栏「女优头像」按钮下载")
+                no_img.setAlignment(Qt.AlignmentFlag.AlignCenter)
+                no_img.setStyleSheet("color: #888; font-size: 14px; padding: 30px;")
+                layout.addWidget(no_img)
+
+            dialog.exec()
 
     def _download_single_cover(self, code: str, cover_url: str):
         """下载单个封面并刷新列表（每爬完一个视频立刻调用）"""

@@ -272,6 +272,24 @@ class Database:
         cursor.execute("INSERT INTO actresses (name) VALUES (?)", (name,))
         return cursor.lastrowid
 
+    def update_actress_avatar(self, name: str, avatar_path: str) -> bool:
+        """更新演员头像路径"""
+        with self._get_connection() as conn:
+            cursor = conn.cursor()
+            cursor.execute(
+                "UPDATE actresses SET avatar_path = ? WHERE name = ?",
+                (avatar_path, name)
+            )
+            return cursor.rowcount > 0
+
+    def get_actress_avatar(self, name: str) -> Optional[str]:
+        """获取演员头像路径"""
+        with self._get_connection() as conn:
+            cursor = conn.cursor()
+            cursor.execute("SELECT avatar_path FROM actresses WHERE name = ?", (name,))
+            row = cursor.fetchone()
+            return row['avatar_path'] if row else None
+
     def _get_or_create_tag(self, cursor: sqlite3.Cursor, name: str, category: str = None) -> int:
         """获取或创建标签记录，返回ID"""
         cursor.execute("SELECT id FROM tags WHERE name = ?", (name,))
